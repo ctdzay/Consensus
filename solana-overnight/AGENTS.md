@@ -30,7 +30,15 @@ Run the CLI under Node, never Bun.
   That stays in instructions/skills. Host code owns auth, idempotency,
   evidence seeding, and side-effect gates.
 - Add npm deps on a first cut. Stick to what `@cursor/bdk` already ships.
+- Broadcast a Solana transaction from a test, or commit a key.
 - Point `serve` at a parent folder during bring-up. It mounts every sibling.
+
+## Live trading
+
+Passive USDC swaps run from `bot/schedules/overnight-scan.ts` only when
+`LIVE_TRADING=1` and `SOLANA_SECRET_KEY` are set in the environment.
+`bdk dev` does not fire schedules. Use `bdk serve` for the unattended desk.
+Rehearsals and chat requests stay paper.
 
 ## Pointers
 

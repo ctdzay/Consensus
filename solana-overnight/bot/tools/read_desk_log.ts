@@ -29,10 +29,11 @@ export default defineTool({
 
 function viewBook(book: Book, scope: "live" | "rehearsal") {
   const pnl = summarizePnl(book);
+  const liveTrading = book.assumptions.liveTrading === true;
   return {
     ok: true,
-    paperTrading: true as const,
-    liveTrading: false as const,
+    paperTrading: !liveTrading,
+    liveTrading,
     scope,
     empty: false,
     nightId: book.nightId,

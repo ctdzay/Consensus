@@ -36,11 +36,11 @@ export const ASSUMPTIONS = {
 } as const;
 
 export const RISK_WARNINGS = [
-  "Paper trading only. This agent has no wallet and cannot send a transaction.",
-  "Fee and slippage numbers are a model, not exchange fills.",
+  "Chat cannot connect a wallet or send a transaction. Rehearsals stay paper.",
+  "Fee and slippage numbers are a model until an armed overnight swap fills.",
   "Indexer data can lag. When GeckoTerminal and DexScreener disagree beyond the gate, the token is rejected.",
   "Top-10 holder share includes AMM vaults, so a fresh migration with few holders is rejected as incomplete.",
-  "Live trading is not implemented. It requires an explicit later change from the operator.",
+  "Live USDC swaps run only on the overnight schedule when LIVE_TRADING=1 and SOLANA_SECRET_KEY are set. A chat request is not approval.",
 ] as const;
 
 const REASON_LABELS: Record<string, string> = {
@@ -135,7 +135,15 @@ export type Assumptions = {
   dexFeeBpsPerSide: number;
   networkFeeUsdPerSide: number;
   slippage: string;
-  liveTrading: false;
+  liveTrading: boolean;
+};
+
+export type LiveFill = {
+  signature: string;
+  inputMint: string;
+  outputMint: string;
+  inputAmountRaw: string;
+  outputAmountRaw: string;
 };
 
 export type PaperPosition = {
@@ -157,6 +165,7 @@ export type PaperPosition = {
   dexPriceUsd: number | null;
   score: number;
   warnings: string[];
+  liveFill?: LiveFill | null;
   lastMark: {
     at: string;
     midPriceUsd: number;
@@ -180,6 +189,7 @@ export type ClosedTrade = PaperPosition & {
   exitLiquidityUsd: number | null;
   proceedsUsd: number | null;
   realizedPnlUsd: number | null;
+  exitFill?: LiveFill | null;
 };
 
 export type RejectRecord = {
@@ -520,8 +530,8 @@ export type CycleResult = {
   ok: true;
   skipped: boolean;
   reason: string | null;
-  paperTrading: true;
-  liveTrading: false;
+  paperTrading: boolean;
+  liveTrading: boolean;
   chicago: string;
   nightId: string | null;
   rehearsal: boolean;

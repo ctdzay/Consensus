@@ -7,6 +7,7 @@ import {
   type Snapshot,
   type TxnWindow,
 } from "./engine.js";
+import { settleLiveOrders } from "./settle.js";
 
 const WSOL = "So11111111111111111111111111111111111111112";
 const MAX_REVIEW = 6;
@@ -126,20 +127,16 @@ export async function runCycle(
     marks,
     universeError: universe.error,
   });
+  if (outcome.book && !outcome.result.skipped && !outcome.book.rehearsal) {
+    outcome = {
+      book: outcome.book,
+      result: await settleLiveOrders(kv, outcome.book, outcome.result),
+    };
+  }
   let saved = false;
   for (let attempt = 0; attempt < 3 && outcome.book; attempt += 1) {
     saved = await writeBook(kv, bookKey(outcome.book.nightId), outcome.book);
     if (saved) break;
-    book = await readBook(kv, bookKey(outcome.book.nightId));
-    outcome = runDeskCycle({
-      now,
-      phase,
-      force,
-      book,
-      candidates: snapshots,
-      marks,
-      universeError: universe.error,
-    });
   }
   if (outcome.book && !saved) {
     await kv.put(
