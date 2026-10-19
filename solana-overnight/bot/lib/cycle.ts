@@ -10,6 +10,10 @@ import {
 
 const WSOL = "So11111111111111111111111111111111111111112";
 const MAX_REVIEW = 6;
+const MAX_INFO_ATTEMPTS = 8;
+const YOUNG_POOL_MS = 15 * 60 * 1000;
+const FRESH_POOL_MS = 36 * 60 * 60 * 1000;
+const INFO_WAIT_MS = 2 * 60 * 60 * 1000;
 const USER_AGENT = "solana-overnight-desk/0.1";
 
 type RawPool = {
@@ -44,7 +48,7 @@ export async function runCycle(
   kv: HostKvApi,
   input: { phase?: "scan" | "report"; force?: boolean },
   now = new Date(),
-): Promise<CycleResult> {
+): Promise<CycleResult & { infoDeferred: number }> {
   const phase = input.phase ?? "scan";
   const force = input.force === true;
   const probe = runDeskCycle({
@@ -56,7 +60,9 @@ export async function runCycle(
     marks: {},
     universeError: null,
   });
-  if (probe.result.skipped || !probe.result.nightId) return probe.result;
+  if (probe.result.skipped || !probe.result.nightId) {
+    return { ...probe.result, infoDeferred: 0 };
+  }
 
   const stored = await readBook(kv, bookKey(probe.result.nightId));
   const universe = await loadUniverse();
@@ -66,18 +72,33 @@ export async function runCycle(
     ...(stored?.open.map((position) => position.mint) ?? []),
     ...(stored?.closed.map((trade) => trade.mint) ?? []),
   ]);
-  const fresh = universe.pools
-    .filter((pool) => !reviewed.has(pool.mint))
-    .sort((a, b) => (b.poolCreatedAt ?? "").localeCompare(a.poolCreatedAt ?? ""))
-    .slice(0, MAX_REVIEW);
-
-  const dex = await loadDexPairs([...fresh.map((pool) => pool.mint), ...openMints]);
-  const snapshots: Snapshot[] = [];
-  for (const pool of fresh) {
-    const info = await loadTokenInfo(pool.mint);
-    snapshots.push(buildSnapshot(pool, dex.get(pool.mint) ?? null, info));
-    await sleep(350);
+  const queue = reviewOrder(
+    universe.pools.filter((pool) => !reviewed.has(pool.mint)),
+    now.getTime(),
+  );
+  const chosen: RawPool[] = [];
+  const infoByMint = new Map<string, TokenInfo | null>();
+  let infoDeferred = 0;
+  let attempts = 0;
+  for (const pool of queue) {
+    if (chosen.length >= MAX_REVIEW || attempts >= MAX_INFO_ATTEMPTS) break;
+    attempts += 1;
+    const loaded = await loadTokenInfo(pool.mint);
+    await sleep(1000);
+    const age = poolAgeMs(pool, now.getTime());
+    const tooNew = age != null && age < INFO_WAIT_MS;
+    if (loaded.status === "unavailable" || (loaded.status === "missing" && tooNew)) {
+      infoDeferred += 1;
+      continue;
+    }
+    chosen.push(pool);
+    infoByMint.set(pool.mint, loaded.status === "ok" ? loaded.info : null);
   }
+
+  const dex = await loadDexPairs([...chosen.map((pool) => pool.mint), ...openMints]);
+  const snapshots: Snapshot[] = chosen.map((pool) =>
+    buildSnapshot(pool, dex.get(pool.mint) ?? null, infoByMint.get(pool.mint) ?? null),
+  );
 
   const marks: Record<string, Mark> = {};
   for (const mint of openMints) {
@@ -132,7 +153,7 @@ export async function runCycle(
   if (outcome.book?.rehearsal) {
     await kv.put("desk:rehearsal-night", outcome.book.nightId);
   }
-  return outcome.result;
+  return { ...outcome.result, infoDeferred };
 }
 
 export async function readDesk(
@@ -143,6 +164,29 @@ export async function readDesk(
   const nightId = await kv.get(pointer);
   if (typeof nightId !== "string" || !nightId) return { book: null, nightId: null };
   return { book: await readBook(kv, bookKey(nightId)), nightId };
+}
+
+function poolAgeMs(pool: RawPool, nowMs: number): number | null {
+  if (!pool.poolCreatedAt) return null;
+  const created = Date.parse(pool.poolCreatedAt);
+  if (!Number.isFinite(created)) return null;
+  return nowMs - created;
+}
+
+function reviewOrder(pools: RawPool[], nowMs: number): RawPool[] {
+  const young: RawPool[] = [];
+  const fresh: RawPool[] = [];
+  const older: RawPool[] = [];
+  for (const pool of pools) {
+    const age = poolAgeMs(pool, nowMs);
+    if (age != null && age < YOUNG_POOL_MS) young.push(pool);
+    else if (age != null && age < FRESH_POOL_MS) fresh.push(pool);
+    else older.push(pool);
+  }
+  const byLiquidity = (a: RawPool, b: RawPool) => (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0);
+  fresh.sort(byLiquidity);
+  older.sort(byLiquidity);
+  return [...fresh, ...older, ...young.slice(0, 2)];
 }
 
 function bookKey(nightId: string): string {
@@ -174,8 +218,6 @@ async function loadUniverse(): Promise<{ pools: RawPool[]; error: string | null 
   let error: string | null = null;
   const urls = [
     "https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=1&include=dex,base_token,quote_token",
-    "https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=2&include=dex,base_token,quote_token",
-    "https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=3&include=dex,base_token,quote_token",
     "https://api.geckoterminal.com/api/v2/networks/solana/dexes/pumpswap/pools?page=1&include=dex,base_token,quote_token",
   ];
   for (const url of urls) {
@@ -189,7 +231,7 @@ async function loadUniverse(): Promise<{ pools: RawPool[]; error: string | null 
     } catch (err) {
       error = err instanceof Error ? err.message : "universe_fetch_failed";
     }
-    await sleep(300);
+    await sleep(800);
   }
   if (pools.length === 0 && !error) error = "no_migrated_pools";
   return { pools, error: pools.length === 0 ? error : null };
@@ -222,7 +264,9 @@ function parsePools(payload: unknown): RawPool[] {
     const quoteMint = quoteId?.startsWith("solana_") ? quoteId.slice("solana_".length) : "";
     if (!mint || !attributes) continue;
     if (quoteMint && quoteMint !== WSOL) continue;
-    const pumpPool = dexId === "pumpswap" || (dexId === "raydium" && mint.endsWith("pump"));
+    const pumpPool =
+      mint.endsWith("pump") &&
+      (dexId === "pumpswap" || dexId === "raydium");
     if (!pumpPool || !dexId) continue;
     const tx = asRecord(asRecord(attributes.transactions)?.h1);
     pools.push({
@@ -268,14 +312,24 @@ type TokenInfo = {
   pumpListed: boolean;
 };
 
-async function loadTokenInfo(mint: string): Promise<TokenInfo | null> {
+async function fetchInfo(mint: string): Promise<{ ok: boolean; status: number; json: unknown }> {
+  const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${encodeURIComponent(mint)}/info`;
+  const first = await fetchOnce(url);
+  if (first.status !== 429) return first;
+  await sleep(2500);
+  return fetchOnce(url);
+}
+
+async function loadTokenInfo(
+  mint: string,
+): Promise<{ status: "ok"; info: TokenInfo } | { status: "missing" } | { status: "unavailable" }> {
   try {
-    const payload = await getJson(
-      `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${encodeURIComponent(mint)}/info`,
-    );
-    const data = asRecord(asRecord(payload)?.data);
+    const response = await fetchInfo(mint);
+    if (response.status === 404) return { status: "missing" };
+    if (!response.ok || !response.json) return { status: "unavailable" };
+    const data = asRecord(asRecord(response.json)?.data);
     const attributes = asRecord(data?.attributes);
-    if (!attributes) return null;
+    if (!attributes) return { status: "unavailable" };
     const holders = asRecord(attributes.holders);
     const distribution = asRecord(holders?.distribution_percentage);
     const launchpad = asRecord(attributes.launchpad_details);
@@ -286,24 +340,27 @@ async function loadTokenInfo(mint: string): Promise<TokenInfo | null> {
       .filter((item): item is string => typeof item === "string")
       .map((item) => item.toLowerCase());
     return {
-      migrated: typeof launchpad?.completed === "boolean" ? launchpad.completed : null,
-      graduationPct: numberOf(launchpad?.graduation_percentage),
-      creatorWallet: stringOf(attributes.developer_address),
-      creatorHoldingPct: numberOf(attributes.developer_holding_percentage),
-      holderCount: numberOf(holders?.count),
-      top10Pct: numberOf(distribution?.top_10),
-      mintAuthorityRevoked: authorityRevoked(attributes.mint_authority),
-      freezeAuthorityRevoked: authorityRevoked(attributes.freeze_authority),
-      honeypot: honeypotOf(attributes.is_honeypot),
-      nsfw: typeof attributes.is_nsfw === "boolean" ? attributes.is_nsfw : null,
-      twitter: Boolean(stringOf(attributes.twitter_handle)),
-      telegram: Boolean(stringOf(attributes.telegram_handle)),
-      website: Array.isArray(attributes.websites) && attributes.websites.length > 0,
-      descriptionChars: stringOf(attributes.description)?.length ?? 0,
-      pumpListed: categories.some((item) => item.includes("pump")),
+      status: "ok",
+      info: {
+        migrated: typeof launchpad?.completed === "boolean" ? launchpad.completed : null,
+        graduationPct: numberOf(launchpad?.graduation_percentage),
+        creatorWallet: stringOf(attributes.developer_address),
+        creatorHoldingPct: numberOf(attributes.developer_holding_percentage),
+        holderCount: numberOf(holders?.count),
+        top10Pct: numberOf(distribution?.top_10),
+        mintAuthorityRevoked: authorityRevoked(attributes.mint_authority),
+        freezeAuthorityRevoked: authorityRevoked(attributes.freeze_authority),
+        honeypot: honeypotOf(attributes.is_honeypot),
+        nsfw: typeof attributes.is_nsfw === "boolean" ? attributes.is_nsfw : null,
+        twitter: Boolean(stringOf(attributes.twitter_handle)),
+        telegram: Boolean(stringOf(attributes.telegram_handle)),
+        website: Array.isArray(attributes.websites) && attributes.websites.length > 0,
+        descriptionChars: stringOf(attributes.description)?.length ?? 0,
+        pumpListed: categories.some((item) => item.includes("pump")),
+      },
     };
   } catch {
-    return null;
+    return { status: "unavailable" };
   }
 }
 

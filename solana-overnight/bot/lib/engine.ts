@@ -320,17 +320,17 @@ function relativeGap(a: number, b: number): number {
 export function assessCandidate(snapshot: Snapshot): Assessment {
   const reasons: string[] = [];
   const pumpMint = snapshot.mint.endsWith("pump") || snapshot.pumpListed;
-  const dexOk =
-    snapshot.dexId === "pumpswap" ||
-    (snapshot.dexId === "raydium" && snapshot.mint.endsWith("pump"));
-  if (!pumpMint || !dexOk) reasons.push("not_pump");
-  if (
-    snapshot.migrated !== true ||
-    snapshot.graduationPct !== 100 ||
-    !snapshot.poolAddress
-  ) {
-    reasons.push("not_migrated");
-  }
+  const onPumpSwap = snapshot.dexId === "pumpswap";
+  const onRaydiumPump = snapshot.dexId === "raydium" && snapshot.mint.endsWith("pump");
+  if (!pumpMint || !(onPumpSwap || onRaydiumPump)) reasons.push("not_pump");
+  // A PumpSwap pool is the migration. The launchpad flag is often still false
+  // after the pool exists, so it confirms a migration but its absence does not
+  // deny one. Raydium still needs the flag or a Pump.fun category.
+  const launchpadCompleted = snapshot.migrated === true || snapshot.graduationPct === 100;
+  const migrated =
+    Boolean(snapshot.poolAddress) &&
+    ((onPumpSwap && pumpMint) || (onRaydiumPump && (launchpadCompleted || snapshot.pumpListed)));
+  if (!migrated) reasons.push("not_migrated");
 
   const prices = [snapshot.gtPriceUsd, snapshot.dexPriceUsd].filter(finite);
   const liquids = [snapshot.gtLiquidityUsd, snapshot.dexLiquidityUsd].filter(finite);
@@ -367,7 +367,7 @@ export function assessCandidate(snapshot: Snapshot): Assessment {
   if (snapshot.mintAuthorityRevoked !== true) reasons.push("mint_authority");
   if (snapshot.freezeAuthorityRevoked !== true) reasons.push("freeze_authority");
   if (snapshot.honeypot === "yes") reasons.push("honeypot");
-  if (snapshot.nsfw !== false) reasons.push("nsfw");
+  if (snapshot.nsfw === true) reasons.push("nsfw");
 
   const liquidityUsd = liquids.length >= 2 ? Math.min(...liquids) : liquids[0] ?? null;
   if (liquidityUsd == null || liquidityUsd < MIN_LIQUIDITY_USD) reasons.push("thin_liquidity");
@@ -436,9 +436,10 @@ export function assessCandidate(snapshot: Snapshot): Assessment {
     Math.min((snapshot.holderCount ?? 0) / 10, 20);
 
   const warnings: string[] = [];
-  if (snapshot.honeypot === "unknown") {
+  if (snapshot.honeypot === "unknown" || snapshot.honeypot == null) {
     warnings.push("Honeypot check is unknown, not a pass.");
   }
+  if (snapshot.nsfw == null) warnings.push("NSFW flag was missing.");
   return {
     decision: "pass",
     reasons: [],

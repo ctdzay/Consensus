@@ -112,11 +112,14 @@ function main() {
     assert.ok(incomplete.reasons.includes("incomplete_holders"));
   }
 
-  const curve = assessCandidate(passing({ migrated: false, graduationPct: 40, dexId: "pump-fun" }));
+  const curve = assessCandidate(passing({ migrated: false, graduationPct: null, dexId: "pump-fun" }));
   assert.equal(curve.decision, "reject");
   if (curve.decision === "reject") {
     assert.ok(curve.reasons.includes("not_migrated"));
   }
+
+  const swapWithoutFlag = assessCandidate(passing({ migrated: false, graduationPct: null }));
+  assert.equal(swapWithoutFlag.decision, "pass");
 
   const fill = simulateEntry(good.midPriceUsd, good.slippageBps);
   assert.ok(fill.fillPriceUsd > good.midPriceUsd);
