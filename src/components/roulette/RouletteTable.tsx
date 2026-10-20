@@ -59,11 +59,12 @@ export function RouletteTable() {
 
   const spin = () => {
     if (spinning || total === 0) return;
+    const n = spinWheel(Math.random);
     setSpinning(true);
+    setResult(n);
     setWinners([]);
     setLastWin(0);
     setMessage("The wheel has the floor.");
-    const n = spinWheel(Math.random);
     const target = wheelLandingRotation(n);
     setRotation((current) => {
       const currentMod = ((current % 360) + 360) % 360;
@@ -73,7 +74,6 @@ export function RouletteTable() {
     });
     window.setTimeout(() => {
       const settled = settleRoulette(n, slip);
-      setResult(n);
       setSpinning(false);
       setWinners(settled.winners);
       setLastWin(settled.payout);
@@ -114,7 +114,11 @@ export function RouletteTable() {
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded-[28px] border border-gold-500/25 bg-felt-900 p-4">
+      <div className="rounded-[28px] border border-gold-500/25 bg-felt-900 p-4">
+        <p className="mb-2 text-[11px] uppercase tracking-[0.16em] text-gold-400 lg:hidden">
+          Swipe the layout to reach 25–36
+        </p>
+        <div className="overflow-x-auto pb-2">
         <div className="min-w-[720px]">
           <div className="mb-2 grid grid-cols-[56px_repeat(12,minmax(0,1fr))_56px] grid-rows-3 gap-1">
             <button
@@ -122,7 +126,7 @@ export function RouletteTable() {
               onClick={() => place(straightId(0))}
               className={cellClass(
                 straightId(0),
-                "row-span-3 grid place-items-center bg-felt-800 font-display text-2xl text-cream",
+                "row-span-3 grid place-items-center bg-felt-800 font-sans text-2xl font-semibold text-cream",
               )}
             >
               0
@@ -208,6 +212,7 @@ export function RouletteTable() {
               </button>
             ))}
           </div>
+        </div>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-4">

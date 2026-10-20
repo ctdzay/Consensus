@@ -35,8 +35,19 @@ export function Wheel({
           transition: "transform 4.2s cubic-bezier(0.12, 0.7, 0.12, 1)",
         }}
       >
+        {WHEEL_ORDER.map((n, i) => (
+          <span
+            key={n}
+            className="absolute left-1/2 top-1/2 text-[9px] font-semibold text-cream"
+            style={{
+              transform: `rotate(${-90 + i * ANGLE + ANGLE / 2}deg) translate(108px) rotate(90deg)`,
+            }}
+          >
+            {n}
+          </span>
+        ))}
         <div className="absolute inset-[22%] rounded-full bg-ink-900" />
-        <div className="absolute inset-[38%] grid place-items-center rounded-full border border-gold-500/40 bg-ink-800 font-display text-2xl text-gold-300">
+        <div className="absolute inset-[38%] grid place-items-center rounded-full border border-gold-500/40 bg-ink-800 font-display text-3xl text-gold-300">
           {label}
         </div>
       </div>

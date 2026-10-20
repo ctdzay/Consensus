@@ -83,6 +83,10 @@ body {
   }
 }
 
+.overflow-x-auto {
+  scrollbar-color: #c6a15b #0a2a20;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reel-spinning,
   .wheel-spin,

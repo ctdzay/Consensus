@@ -18,12 +18,12 @@ import {
 } from "@/lib/slots";
 
 const SYMBOL_GLYPH: Record<SlotSymbolId, string> = {
-  cherry: "●",
-  lemon: "●",
-  plum: "●",
-  grape: "●",
-  bell: "▲",
-  bar: "■",
+  cherry: "CH",
+  lemon: "LE",
+  plum: "PL",
+  grape: "GR",
+  bell: "BL",
+  bar: "BAR",
   seven: "7",
   diamond: "◆",
 };
@@ -139,7 +139,7 @@ export function SlotsTable() {
                 return (
                   <div
                     key={`${reelIndex}-${row}`}
-                    className={`grid h-16 place-items-center rounded-lg border text-2xl md:h-20 md:text-3xl ${
+                    className={`grid h-16 place-items-center rounded-lg border font-display text-lg font-semibold tracking-wide md:h-20 md:text-xl ${
                       lit
                         ? "border-gold-400 bg-gold-500/20 shadow-gold"
                         : "border-white/5 bg-ink-800"
